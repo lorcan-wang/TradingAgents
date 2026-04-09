@@ -29,6 +29,7 @@ _PROVIDER_CONFIG = {
     "xai": ("https://api.x.ai/v1", "XAI_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "ollama": ("http://localhost:11434/v1", None),
+    "minimax": ("https://api.minimaxi.com/v1", "MINIMAX_API_KEY"),
 }
 
 
@@ -78,6 +79,12 @@ class OpenAIClient(BaseLLMClient):
         # all model families. Third-party providers use Chat Completions.
         if self.provider == "openai":
             llm_kwargs["use_responses_api"] = True
+
+        # MiniMax: enable reasoning_split so thinking content goes to
+        # reasoning_details instead of being inlined as <think> tags.
+        if self.provider == "minimax":
+            llm_kwargs.setdefault("extra_body", {})
+            llm_kwargs["extra_body"]["reasoning_split"] = True
 
         return NormalizedChatOpenAI(**llm_kwargs)
 
