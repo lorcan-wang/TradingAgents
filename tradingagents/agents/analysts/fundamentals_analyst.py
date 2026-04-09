@@ -23,12 +23,26 @@ def create_fundamentals_analyst(llm):
             get_income_statement,
         ]
 
-        system_message = (
-            "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
-            + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
-            + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
-            + get_language_instruction(),
-        )
+        is_crypto = state["company_of_interest"].upper().replace("-USDT", "-USD").endswith("-USD")
+
+        if is_crypto:
+            system_message = (
+                "You are a researcher tasked with analyzing fundamental information about a cryptocurrency asset. "
+                "Please write a comprehensive report including: market capitalization, circulating supply vs total/max supply, "
+                "price performance (24h/7d/30d/1y changes), all-time high/low analysis, developer activity (GitHub commits, forks, stars), "
+                "community metrics (social followers, sentiment), and overall market positioning. "
+                "Use `get_fundamentals` for market data overview, and `get_balance_sheet`/`get_cashflow`/`get_income_statement` for detailed developer, community, and on-chain metrics. "
+                "Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+                + " Make sure to append a Markdown table at the end of the report to organize key points."
+                + get_language_instruction(),
+            )
+        else:
+            system_message = (
+                "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+                + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
+                + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
+                + get_language_instruction(),
+            )
 
         prompt = ChatPromptTemplate.from_messages(
             [

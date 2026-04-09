@@ -24,6 +24,13 @@ from .alpha_vantage import (
 )
 from .alpha_vantage_common import AlphaVantageRateLimitError
 
+
+from .coingecko import (
+    get_crypto_fundamentals,
+    get_crypto_detail,
+)
+from .crypto_sentiment import get_fear_greed_index, get_crypto_trending
+
 # Configuration and routing logic
 from .config import get_config
 
@@ -63,6 +70,7 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "alpha_vantage",
+    "coingecko",
 ]
 
 # Mapping of methods to their vendor-specific implementations
@@ -81,18 +89,22 @@ VENDOR_METHODS = {
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "coingecko": get_crypto_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
+        "coingecko": get_crypto_detail,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
+        "coingecko": get_crypto_detail,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+        "coingecko": get_crypto_detail,
     },
     # news_data
     "get_news": {
@@ -102,10 +114,12 @@ VENDOR_METHODS = {
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "coingecko": get_fear_greed_index,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
+        "coingecko": get_crypto_trending,
     },
 }
 

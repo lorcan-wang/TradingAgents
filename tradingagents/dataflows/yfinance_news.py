@@ -126,6 +126,8 @@ def get_global_news_yfinance(
         "Federal Reserve interest rates",
         "inflation economic outlook",
         "global markets trading",
+        "cryptocurrency bitcoin market",
+        "crypto regulation blockchain",
     ]
 
     all_news = []

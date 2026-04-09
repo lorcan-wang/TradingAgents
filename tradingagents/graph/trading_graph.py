@@ -191,40 +191,80 @@ class TradingAgentsGraph:
             ),
         }
 
+    # Known crypto symbols for reliable detection
+    _KNOWN_CRYPTO_SYMBOLS = {
+        "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "DOT", "AVAX",
+        "MATIC", "LINK", "UNI", "ATOM", "LTC", "ETC", "NEAR", "APT", "ARB",
+        "OP", "SUI", "SEI", "TRX", "SHIB", "PEPE", "FIL", "ICP", "TON",
+        "AAVE", "MKR", "CRV", "SNX", "COMP", "SUSHI", "YFI", "SAND",
+        "MANA", "AXS", "ENJ", "GALA", "IMX", "RNDR", "FET", "AGIX",
+        "WLD", "INJ", "TIA", "JUP", "WIF", "BONK", "FLOKI", "RENDER",
+    }
+
+    @classmethod
+    def _is_crypto_ticker(cls, ticker: str) -> bool:
+        """Detect if a ticker is a cryptocurrency (e.g., BTC-USD, ETH-USDT).
+
+        Uses known crypto symbol whitelist to avoid false positives
+        from forex pairs or stock tickers ending in -USD.
+        """
+        upper = ticker.upper()
+        if not (upper.endswith("-USD") or upper.endswith("-USDT")):
+            return False
+        symbol = upper.replace("-USDT", "").replace("-USD", "")
+        return symbol in cls._KNOWN_CRYPTO_SYMBOLS
+
     def propagate(self, company_name, trade_date):
         """Run the trading agents graph for a company on a specific date."""
 
         self.ticker = company_name
 
-        # Initialize state
-        init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date
-        )
-        args = self.propagator.get_graph_args()
+        # Save original config values before potential crypto override
+        orig_fundamental = self.config["data_vendors"]["fundamental_data"]
+        orig_tool_vendors = self.config.get("tool_vendors", {}).copy()
 
-        if self.debug:
-            # Debug mode with tracing
-            trace = []
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if len(chunk["messages"]) == 0:
-                    pass
-                else:
-                    chunk["messages"][-1].pretty_print()
-                    trace.append(chunk)
+        try:
+            # Auto-switch data vendors for cryptocurrency tickers
+            if self._is_crypto_ticker(company_name):
+                self.config["data_vendors"]["fundamental_data"] = "coingecko"
+                self.config["tool_vendors"]["get_global_news"] = "coingecko"
+                self.config["tool_vendors"]["get_insider_transactions"] = "coingecko"
+                set_config(self.config)
 
-            final_state = trace[-1]
-        else:
-            # Standard mode without tracing
-            final_state = self.graph.invoke(init_agent_state, **args)
+            # Initialize state
+            init_agent_state = self.propagator.create_initial_state(
+                company_name, trade_date
+            )
+            args = self.propagator.get_graph_args()
 
-        # Store current state for reflection
-        self.curr_state = final_state
+            if self.debug:
+                # Debug mode with tracing
+                trace = []
+                for chunk in self.graph.stream(init_agent_state, **args):
+                    if len(chunk["messages"]) == 0:
+                        pass
+                    else:
+                        chunk["messages"][-1].pretty_print()
+                        trace.append(chunk)
 
-        # Log state
-        self._log_state(trade_date, final_state)
+                final_state = trace[-1]
+            else:
+                # Standard mode without tracing
+                final_state = self.graph.invoke(init_agent_state, **args)
 
-        # Return decision and processed signal
-        return final_state, self.process_signal(final_state["final_trade_decision"])
+            # Store current state for reflection
+            self.curr_state = final_state
+
+            # Log state
+            self._log_state(trade_date, final_state)
+
+            # Return decision and processed signal
+            return final_state, self.process_signal(final_state["final_trade_decision"])
+        finally:
+            # Restore original config to avoid leaking crypto settings to stock analysis
+            self.config["data_vendors"]["fundamental_data"] = orig_fundamental
+            self.config["tool_vendors"] = orig_tool_vendors
+            set_config(self.config)
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
