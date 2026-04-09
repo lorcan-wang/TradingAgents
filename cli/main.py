@@ -397,28 +397,12 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         )
     )
 
-    # Analysis panel showing current report (tail of content to fit panel)
+    # Analysis panel showing current report
     if message_buffer.current_report:
-        report_text = message_buffer.current_report
-        # Estimate visible lines based on terminal height; show tail of report
-        # so user always sees the latest content as it streams in.
-        try:
-            import shutil
-            term_h = shutil.get_terminal_size().lines
-        except Exception:
-            term_h = 40
-        # analysis panel gets ~5/8 of main area; subtract header/footer/borders
-        max_lines = max(10, int(term_h * 0.55) - 6)
-        lines = report_text.split("\n")
-        if len(lines) > max_lines:
-            report_text = "\n".join(lines[-max_lines:])
-            title = f"Current Report (showing last {max_lines} of {len(lines)} lines)"
-        else:
-            title = "Current Report"
         layout["analysis"].update(
             Panel(
-                Markdown(report_text),
-                title=title,
+                Markdown(message_buffer.current_report),
+                title="Current Report",
                 border_style="green",
                 padding=(1, 2),
             )
