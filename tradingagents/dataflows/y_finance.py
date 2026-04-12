@@ -10,16 +10,28 @@ def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+    interval: str = "1d",
 ):
+    from tradingagents.interval_utils import parse_trade_datetime, is_intraday, get_yf_max_period
 
-    datetime.strptime(start_date, "%Y-%m-%d")
-    datetime.strptime(end_date, "%Y-%m-%d")
+    # Validate date formats (supports both YYYY-MM-DD and YYYY-MM-DD HH:MM)
+    start_dt = parse_trade_datetime(start_date)
+    end_dt = parse_trade_datetime(end_date)
 
     # Create ticker object
     ticker = yf.Ticker(symbol.upper())
 
-    # Fetch historical data for the specified date range
-    data = yf_retry(lambda: ticker.history(start=start_date, end=end_date))
+    if is_intraday(interval):
+        # For intraday, use period-based download then filter by date range,
+        # because yfinance ticker.history with start/end can fail for intraday intervals.
+        data = yf_retry(lambda: ticker.history(period=get_yf_max_period(interval), interval=interval))
+        if not data.empty:
+            if data.index.tz is not None:
+                data.index = data.index.tz_localize(None)
+            data = data[(data.index >= start_dt) & (data.index <= end_dt)]
+    else:
+        # Fetch historical data for the specified date range
+        data = yf_retry(lambda: ticker.history(start=start_date, end=end_date, interval=interval))
 
     # Check if data is empty
     if data.empty:
@@ -53,8 +65,11 @@ def get_stock_stats_indicators_window(
     curr_date: Annotated[
         str, "The current trading date you are trading on, YYYY-mm-dd"
     ],
-    look_back_days: Annotated[int, "how many days to look back"],
+    look_back_days: Annotated[int, "how many days/bars to look back"],
+    interval: str = "1d",
+    vendor: str = "yfinance",
 ) -> str:
+    from tradingagents.interval_utils import is_intraday, datetime_format
 
     best_ind_params = {
         # Moving Averages
@@ -135,48 +150,61 @@ def get_stock_stats_indicators_window(
         )
 
     end_date = curr_date
-    curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    dt_fmt = datetime_format(interval)
+
+    if is_intraday(interval):
+        from tradingagents.interval_utils import parse_trade_datetime
+        curr_date_dt = parse_trade_datetime(curr_date)
+    else:
+        curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     before = curr_date_dt - relativedelta(days=look_back_days)
 
     # Optimized: Get stock data once and calculate indicators for all dates
     try:
-        indicator_data = _get_stock_stats_bulk(symbol, indicator, curr_date)
-        
-        # Generate the date range we need
-        current_dt = curr_date_dt
-        date_values = []
-        
-        while current_dt >= before:
-            date_str = current_dt.strftime('%Y-%m-%d')
-            
-            # Look up the indicator value for this date
-            if date_str in indicator_data:
-                indicator_value = indicator_data[date_str]
-            else:
-                indicator_value = "N/A: Not a trading day (weekend or holiday)"
-            
-            date_values.append((date_str, indicator_value))
-            current_dt = current_dt - relativedelta(days=1)
-        
+        indicator_data = _get_stock_stats_bulk(symbol, indicator, curr_date, interval=interval, vendor=vendor)
+
+        if is_intraday(interval):
+            # For intraday, iterate over actual data points (not day by day)
+            date_values = [
+                (k, v) for k, v in sorted(indicator_data.items(), reverse=True)
+                if parse_trade_datetime(k) >= before and parse_trade_datetime(k) <= curr_date_dt
+            ][:look_back_days]
+        else:
+            # Generate the date range we need (daily)
+            current_dt = curr_date_dt
+            date_values = []
+
+            while current_dt >= before:
+                date_str = current_dt.strftime(dt_fmt)
+
+                if date_str in indicator_data:
+                    indicator_value = indicator_data[date_str]
+                else:
+                    indicator_value = "N/A: Not a trading day (weekend or holiday)"
+
+                date_values.append((date_str, indicator_value))
+                current_dt = current_dt - relativedelta(days=1)
+
         # Build the result string
         ind_string = ""
         for date_str, value in date_values:
             ind_string += f"{date_str}: {value}\n"
-        
+
     except Exception as e:
         print(f"Error getting bulk stockstats data: {e}")
         # Fallback to original implementation if bulk method fails
         ind_string = ""
-        curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-        while curr_date_dt >= before:
+        curr_date_dt_fb = datetime.strptime(curr_date[:10], "%Y-%m-%d")
+        before_fb = curr_date_dt_fb - relativedelta(days=look_back_days)
+        while curr_date_dt_fb >= before_fb:
             indicator_value = get_stockstats_indicator(
-                symbol, indicator, curr_date_dt.strftime("%Y-%m-%d")
+                symbol, indicator, curr_date_dt_fb.strftime("%Y-%m-%d")
             )
-            ind_string += f"{curr_date_dt.strftime('%Y-%m-%d')}: {indicator_value}\n"
-            curr_date_dt = curr_date_dt - relativedelta(days=1)
+            ind_string += f"{curr_date_dt_fb.strftime('%Y-%m-%d')}: {indicator_value}\n"
+            curr_date_dt_fb = curr_date_dt_fb - relativedelta(days=1)
 
     result_str = (
-        f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {end_date}:\n\n"
+        f"## {indicator} values from {before.strftime(dt_fmt)} to {end_date}:\n\n"
         + ind_string
         + "\n\n"
         + best_ind_params.get(indicator, "No description available.")
@@ -188,18 +216,22 @@ def get_stock_stats_indicators_window(
 def _get_stock_stats_bulk(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to calculate"],
-    curr_date: Annotated[str, "current date for reference"]
+    curr_date: Annotated[str, "current date for reference"],
+    interval: str = "1d",
+    vendor: str = "yfinance",
 ) -> dict:
     """
     Optimized bulk calculation of stock stats indicators.
     Fetches data once and calculates indicator for all available dates.
-    Returns dict mapping date strings to indicator values.
+    Returns dict mapping date/datetime strings to indicator values.
     """
     from stockstats import wrap
+    from tradingagents.interval_utils import datetime_format
 
-    data = load_ohlcv(symbol, curr_date)
+    data = load_ohlcv(symbol, curr_date, interval=interval, vendor=vendor)
     df = wrap(data)
-    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
+    dt_fmt = datetime_format(interval)
+    df["Date"] = df["Date"].dt.strftime(dt_fmt)
     
     # Calculate the indicator for all rows at once
     df[indicator]  # This triggers stockstats to calculate the indicator

@@ -23,6 +23,8 @@ DEFAULT_CONFIG = {
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
+    # Trading interval: "1m", "5m", "15m", "30m", "1h", "1d"
+    "trading_interval": "1d",
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {

@@ -36,6 +36,14 @@ def get_global_news(
     Returns:
         str: A formatted string containing global news data
     """
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.interval_utils import get_news_lookback_days, is_intraday
+
+    interval = get_config().get("trading_interval", "1d")
+    # For intraday, shorten news lookback if caller used the daily default
+    if is_intraday(interval) and look_back_days == 7:
+        look_back_days = get_news_lookback_days(interval)
+
     return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
 
 @tool

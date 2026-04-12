@@ -62,7 +62,16 @@ def get_indicator(
             f"Indicator {indicator} is not supported. Please choose from: {list(supported_indicators.keys())}"
         )
 
-    curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    from tradingagents.interval_utils import get_av_interval as _get_av_interval, is_intraday
+
+    # Map interval from config format to Alpha Vantage format
+    interval = _get_av_interval(interval)
+
+    # Parse date (supports both daily and intraday formats)
+    try:
+        curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d %H:%M")
+    except ValueError:
+        curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     before = curr_date_dt - relativedelta(days=look_back_days)
 
     # Get the full data for the period instead of making individual calls
@@ -188,8 +197,14 @@ def get_indicator(
             if len(values) > value_col_idx:
                 try:
                     date_str = values[date_col_idx].strip()
-                    # Parse the date
-                    date_dt = datetime.strptime(date_str, "%Y-%m-%d")
+                    # Parse the date (support both daily and intraday formats)
+                    try:
+                        date_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        try:
+                            date_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
+                        except ValueError:
+                            date_dt = datetime.strptime(date_str, "%Y-%m-%d")
 
                     # Check if date is in our range
                     if before <= date_dt <= curr_date_dt:
@@ -201,9 +216,10 @@ def get_indicator(
         # Sort by date and format output
         result_data.sort(key=lambda x: x[0])
 
+        dt_out_fmt = "%Y-%m-%d %H:%M" if interval not in ("daily", "weekly", "monthly") else "%Y-%m-%d"
         ind_string = ""
         for date_dt, value in result_data:
-            ind_string += f"{date_dt.strftime('%Y-%m-%d')}: {value}\n"
+            ind_string += f"{date_dt.strftime(dt_out_fmt)}: {value}\n"
 
         if not ind_string:
             ind_string = "No data available for the specified date range.\n"

@@ -8,7 +8,7 @@ from tradingagents.llm_clients.model_catalog import get_model_options
 
 console = Console()
 
-TICKER_INPUT_EXAMPLES = "Examples: SPY, CNC.TO, 7203.T, 0700.HK, BTC-USD, ETH-USD"
+TICKER_INPUT_EXAMPLES = "Examples: SPY, CNC.TO, 7203.T, 0700.HK, BTC-USDT, ETH-USDT"
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),

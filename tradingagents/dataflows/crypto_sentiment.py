@@ -7,7 +7,9 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-def get_fear_greed_index(ticker: str = None, curr_date: str = None) -> str:
+def get_fear_greed_index(*args, **kwargs) -> str:
+    # Accepts any signature (ticker/curr_date/look_back_days/limit) for
+    # drop-in compatibility with multiple route_to_vendor call sites.
     """Get the Crypto Fear & Greed Index from Alternative.me.
 
     Free, no API key required. Provides overall market sentiment (0-100).
@@ -81,7 +83,9 @@ def get_fear_greed_index(ticker: str = None, curr_date: str = None) -> str:
         return f"Error retrieving Fear & Greed Index: {str(e)}"
 
 
-def get_crypto_trending(ticker: str = None, curr_date: str = None) -> str:
+def get_crypto_trending(*args, **kwargs) -> str:
+    # Accepts any signature for drop-in compatibility with multiple
+    # route_to_vendor call sites (get_insider_transactions passes ticker).
     """Get trending cryptocurrencies from CoinGecko.
 
     Free, no API key required. Shows what the market is most interested in.

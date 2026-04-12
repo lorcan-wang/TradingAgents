@@ -44,8 +44,13 @@ _TICKER_TO_ID = {
 
 
 def _parse_crypto_symbol(ticker: str) -> tuple[str, str]:
-    """Parse ticker like 'BTC-USD' into (symbol='BTC', coingecko_id='bitcoin')."""
-    symbol = ticker.upper().replace("-USD", "").replace("-USDT", "").strip()
+    """Parse ticker like 'BTC-USD' or 'BTC-USDT' into (symbol='BTC', coingecko_id='bitcoin').
+
+    IMPORTANT: ``-USDT`` must be stripped before ``-USD``, otherwise
+    ``BTC-USDT`` becomes ``BTCT`` (the ``-USD`` substring inside ``-USDT``
+    matches first).
+    """
+    symbol = ticker.upper().replace("-USDT", "").replace("-USD", "").strip()
     cg_id = _TICKER_TO_ID.get(symbol)
     if not cg_id:
         # Fallback: use lowercase symbol as id (works for many coins)
@@ -76,7 +81,7 @@ def _cg_request(endpoint: str, params: dict = None, max_retries: int = 3) -> dic
     return {}
 
 
-def get_crypto_fundamentals(ticker: str, curr_date: str = None) -> str:
+def get_crypto_fundamentals(ticker: str, *args, **kwargs) -> str:
     """Get cryptocurrency market fundamentals from CoinGecko.
 
     Replaces get_fundamentals for crypto assets. Returns market cap,
@@ -148,10 +153,14 @@ def get_crypto_fundamentals(ticker: str, curr_date: str = None) -> str:
         return f"Error retrieving crypto fundamentals for {ticker}: {str(e)}"
 
 
-def get_crypto_detail(ticker: str, curr_date: str = None) -> str:
+def get_crypto_detail(ticker: str, *args, **kwargs) -> str:
     """Get detailed cryptocurrency data including developer and community metrics.
 
     Replaces get_balance_sheet/get_cashflow/get_income_statement for crypto.
+    Signature is forgiving (``*args, **kwargs``) because it is routed from
+    multiple fundamentals tools whose positional args differ (e.g.
+    ``get_balance_sheet(ticker, freq, curr_date)`` vs
+    ``get_fundamentals(ticker, curr_date)``).
     """
     symbol, cg_id = _parse_crypto_symbol(ticker)
 
@@ -234,3 +243,146 @@ def get_crypto_detail(ticker: str, curr_date: str = None) -> str:
 
     except Exception as e:
         return f"Error retrieving crypto detail for {ticker}: {str(e)}"
+
+
+# Per-symbol subreddit mapping for crypto social sentiment.
+# Falls back to r/CryptoCurrency (the largest pan-crypto sub) for anything
+# not listed here. Reddit JSON is free and requires no auth, just a UA.
+_SYMBOL_TO_SUBREDDITS = {
+    "BTC": ["Bitcoin", "BitcoinMarkets"],
+    "ETH": ["ethereum", "ethfinance"],
+    "SOL": ["solana"],
+    "BNB": ["binance"],
+    "XRP": ["Ripple"],
+    "ADA": ["cardano"],
+    "DOGE": ["dogecoin"],
+    "DOT": ["dot"],
+    "AVAX": ["Avax"],
+    "MATIC": ["0xPolygon"],
+    "LINK": ["Chainlink"],
+    "UNI": ["UniSwap"],
+    "ATOM": ["cosmosnetwork"],
+    "LTC": ["litecoin"],
+    "NEAR": ["NEARProtocol"],
+    "APT": ["Aptos"],
+    "ARB": ["Arbitrum"],
+    "OP": ["Optimism"],
+    "SUI": ["SuiNetwork"],
+    "TRX": ["Tronix"],
+    "SHIB": ["SHIBArmy"],
+    "PEPE": ["pepecoin"],
+    "FIL": ["filecoin"],
+    "ICP": ["dfinity"],
+    "TON": ["TONcoin"],
+    "AAVE": ["Aave_Official"],
+}
+
+
+_REDDIT_HEADERS = {
+    "User-Agent": "TradingAgents/0.1 (research; contact: github)"
+}
+
+
+def _fetch_reddit_posts(subreddit: str, limit: int = 10) -> list[dict]:
+    """Pull hot posts from a subreddit. Returns [] on any failure."""
+    try:
+        resp = requests.get(
+            f"https://www.reddit.com/r/{subreddit}/hot.json",
+            params={"limit": limit},
+            headers=_REDDIT_HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [c.get("data", {}) for c in data.get("data", {}).get("children", [])]
+    except Exception as e:
+        logger.warning(f"Reddit fetch failed for r/{subreddit}: {e}")
+        return []
+
+
+def get_crypto_status_news(ticker: str, *args, **kwargs) -> str:
+    """Ticker-scoped crypto social sentiment via Reddit hot posts.
+
+    Replaces ``get_news`` for crypto tickers. Pulls top posts from the
+    coin's primary subreddit(s) — and r/CryptoCurrency as fallback — to
+    surface real community discussion that Yahoo Finance's stock-oriented
+    ``get_news`` cannot provide for crypto assets.
+
+    Note: previously used CoinGecko's ``coins/{id}/status_updates``
+    endpoint, which has been deprecated by CoinGecko (returns 'Incorrect
+    path'). Reddit JSON is free, no key required, and gives much richer
+    real social signal.
+    """
+    start_date = args[0] if len(args) >= 1 else kwargs.get("start_date")
+    end_date = args[1] if len(args) >= 2 else kwargs.get("end_date")
+
+    try:
+        symbol, _cg_id = _parse_crypto_symbol(ticker)
+    except Exception:
+        return f"No crypto news source available for ticker '{ticker}'"
+
+    subs = _SYMBOL_TO_SUBREDDITS.get(symbol, [])
+    # Always include the catch-all crypto sub so we get *something*
+    if "CryptoCurrency" not in subs:
+        subs = subs + ["CryptoCurrency"]
+
+    header_parts = [f"## {symbol} Social Sentiment (Reddit hot posts)"]
+    if start_date or end_date:
+        rng = []
+        if start_date:
+            rng.append(f"from {start_date}")
+        if end_date:
+            rng.append(f"to {end_date}")
+        header_parts.append(" ".join(rng))
+    header = " ".join(header_parts) + "\n"
+
+    sections: list[str] = [header]
+    total_posts = 0
+
+    for sub in subs:
+        posts = _fetch_reddit_posts(sub, limit=10)
+        if not posts:
+            continue
+        # Filter: drop sticky/megathread posts that pollute every sub
+        posts = [
+            p for p in posts
+            if not p.get("stickied") and (p.get("title") or "").strip()
+        ]
+        if not posts:
+            continue
+
+        sections.append(f"\n### r/{sub}\n")
+        for p in posts[:8]:
+            title = (p.get("title") or "").strip()
+            score = p.get("score", 0)
+            num_comments = p.get("num_comments", 0)
+            created_utc = p.get("created_utc")
+            created_str = ""
+            if created_utc:
+                try:
+                    created_str = datetime.utcfromtimestamp(int(created_utc)).strftime("%Y-%m-%d %H:%M UTC")
+                except (ValueError, TypeError, OSError):
+                    pass
+            selftext = (p.get("selftext") or "").strip()
+
+            sections.append(f"- **[{score} ↑ / {num_comments} 💬] {title}**  ({created_str})")
+            if selftext:
+                snippet = selftext[:300].replace("\n", " ")
+                sections.append(f"  > {snippet}")
+            total_posts += 1
+
+    if total_posts == 0:
+        return (
+            header
+            + "\nNo Reddit posts retrieved (all subreddit fetches failed). "
+            "For broader crypto market sentiment, call `get_global_news` "
+            "which routes to the Fear & Greed index for crypto tickers."
+        )
+
+    sections.append(
+        f"\n---\nRetrieved {total_posts} posts across {len([s for s in subs])} "
+        "subreddit(s). Higher score / comment count signals stronger community "
+        "interest. Combine with `get_global_news` (Fear & Greed index) for macro "
+        "sentiment context."
+    )
+    return "\n".join(sections)

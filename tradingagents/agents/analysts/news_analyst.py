@@ -1,9 +1,13 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_current_datetime_label,
     get_global_news,
+    get_intraday_banner,
     get_language_instruction,
     get_news,
+    get_news_timeframe_label,
+    get_timeframe_context,
 )
 from tradingagents.dataflows.config import get_config
 
@@ -18,9 +22,12 @@ def create_news_analyst(llm):
             get_global_news,
         ]
 
+        timeframe_label = get_news_timeframe_label()
         system_message = (
-            "You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for company-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            get_intraday_banner()
+            + f"You are a news researcher tasked with analyzing recent news and trends over the {timeframe_label}. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for company-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            + get_timeframe_context()
             + get_language_instruction()
         )
 
@@ -35,7 +42,7 @@ def create_news_analyst(llm):
                     " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
                     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
-                    "For your reference, the current date is {current_date}. {instrument_context}",
+                    "For your reference, the {datetime_label} is {current_date}. {instrument_context}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -44,6 +51,7 @@ def create_news_analyst(llm):
         prompt = prompt.partial(system_message=system_message)
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
+        prompt = prompt.partial(datetime_label=get_current_datetime_label())
         prompt = prompt.partial(instrument_context=instrument_context)
 
         chain = prompt | llm.bind_tools(tools)

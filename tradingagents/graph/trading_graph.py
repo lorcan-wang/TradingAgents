@@ -203,33 +203,83 @@ class TradingAgentsGraph:
 
     @classmethod
     def _is_crypto_ticker(cls, ticker: str) -> bool:
-        """Detect if a ticker is a cryptocurrency (e.g., BTC-USD, ETH-USDT).
+        """Detect if a ticker is a cryptocurrency.
 
-        Uses known crypto symbol whitelist to avoid false positives
+        Accepts multiple conventions:
+          - Pair form with dash:  BTC-USDT, ETH-USDT, BTC-USD (legacy)
+          - Pair form with slash: BTC/USDT
+          - Exchange form:        BTCUSDT, ETHUSDT
+
+        Uses a known crypto symbol whitelist to avoid false positives
         from forex pairs or stock tickers ending in -USD.
         """
-        upper = ticker.upper()
-        if not (upper.endswith("-USD") or upper.endswith("-USDT")):
-            return False
-        symbol = upper.replace("-USDT", "").replace("-USD", "")
-        return symbol in cls._KNOWN_CRYPTO_SYMBOLS
+        upper = ticker.upper().replace("/", "-")
+        # Pair form: BTC-USDT / BTC-USD
+        if upper.endswith("-USDT") or upper.endswith("-USD"):
+            symbol = upper.replace("-USDT", "").replace("-USD", "")
+            return symbol in cls._KNOWN_CRYPTO_SYMBOLS
+        # Exchange form: BTCUSDT
+        if upper.endswith("USDT"):
+            symbol = upper[: -len("USDT")]
+            return symbol in cls._KNOWN_CRYPTO_SYMBOLS
+        return False
+
+    def apply_crypto_vendor_switch(self, ticker: str) -> dict:
+        """Auto-switch data vendors when ``ticker`` is a cryptocurrency.
+
+        Both ``propagate()`` and ``cli/main.py`` (which streams the graph
+        directly without calling propagate) need this switch to fire, so
+        the logic lives in one place. Returns the original ``data_vendors``
+        / ``tool_vendors`` snapshot for restoration via
+        ``restore_vendor_config()``.
+        """
+        snapshot = {
+            "data_vendors": {k: v for k, v in self.config["data_vendors"].items()},
+            "tool_vendors": self.config.get("tool_vendors", {}).copy(),
+        }
+        if not self._is_crypto_ticker(ticker):
+            return snapshot
+
+        # OHLCV + indicators → Binance (real exchange prices, no Yahoo lag)
+        self.config["data_vendors"]["core_stock_apis"] = "binance"
+        self.config["data_vendors"]["technical_indicators"] = "binance"
+        # Fundamentals / sentiment / insiders → CoinGecko (crypto-native)
+        self.config["data_vendors"]["fundamental_data"] = "coingecko"
+        self.config["tool_vendors"]["get_news"] = "coingecko"
+        self.config["tool_vendors"]["get_global_news"] = "coingecko"
+        self.config["tool_vendors"]["get_insider_transactions"] = "coingecko"
+        set_config(self.config)
+        return snapshot
+
+    def restore_vendor_config(self, snapshot: dict) -> None:
+        """Restore vendor config saved by ``apply_crypto_vendor_switch``."""
+        self.config["data_vendors"] = snapshot["data_vendors"]
+        self.config["tool_vendors"] = snapshot["tool_vendors"]
+        set_config(self.config)
 
     def propagate(self, company_name, trade_date):
-        """Run the trading agents graph for a company on a specific date."""
+        """Run the trading agents graph for a company on a specific date.
+
+        For daily mode: trade_date should be 'YYYY-MM-DD'.
+        For intraday mode: trade_date should be 'YYYY-MM-DD HH:MM'.
+        """
+        from tradingagents.interval_utils import is_intraday
+
+        interval = self.config.get("trading_interval", "1d")
+        if is_intraday(interval) and " " not in str(trade_date):
+            raise ValueError(
+                f"Intraday mode (interval={interval}) requires trade_date in "
+                f"'YYYY-MM-DD HH:MM' format, got '{trade_date}'"
+            )
 
         self.ticker = company_name
 
-        # Save original config values before potential crypto override
-        orig_fundamental = self.config["data_vendors"]["fundamental_data"]
-        orig_tool_vendors = self.config.get("tool_vendors", {}).copy()
+        # Auto-switch data vendors for cryptocurrency tickers (returns
+        # snapshot for restoration in finally to prevent leaking crypto
+        # settings into a subsequent stock-ticker run on the same graph).
+        snapshot = self.apply_crypto_vendor_switch(company_name)
 
         try:
-            # Auto-switch data vendors for cryptocurrency tickers
-            if self._is_crypto_ticker(company_name):
-                self.config["data_vendors"]["fundamental_data"] = "coingecko"
-                self.config["tool_vendors"]["get_global_news"] = "coingecko"
-                self.config["tool_vendors"]["get_insider_transactions"] = "coingecko"
-                set_config(self.config)
 
             # Initialize state
             init_agent_state = self.propagator.create_initial_state(
@@ -261,10 +311,7 @@ class TradingAgentsGraph:
             # Return decision and processed signal
             return final_state, self.process_signal(final_state["final_trade_decision"])
         finally:
-            # Restore original config to avoid leaking crypto settings to stock analysis
-            self.config["data_vendors"]["fundamental_data"] = orig_fundamental
-            self.config["tool_vendors"] = orig_tool_vendors
-            set_config(self.config)
+            self.restore_vendor_config(snapshot)
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
@@ -302,7 +349,9 @@ class TradingAgentsGraph:
         directory = Path(self.config["results_dir"]) / self.ticker / "TradingAgentsStrategy_logs"
         directory.mkdir(parents=True, exist_ok=True)
 
-        log_path = directory / f"full_states_log_{trade_date}.json"
+        # Replace ':' in trade_date for filesystem compatibility (intraday HH:MM)
+        safe_trade_date = str(trade_date).replace(":", "-")
+        log_path = directory / f"full_states_log_{safe_trade_date}.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(self.log_states_dict[str(trade_date)], f, indent=4)
 

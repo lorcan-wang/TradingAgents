@@ -28,8 +28,13 @@ from .alpha_vantage_common import AlphaVantageRateLimitError
 from .coingecko import (
     get_crypto_fundamentals,
     get_crypto_detail,
+    get_crypto_status_news,
 )
 from .crypto_sentiment import get_fear_greed_index, get_crypto_trending
+from .binance_data import (
+    get_binance_stock_data,
+    get_binance_indicators_window,
+)
 
 # Configuration and routing logic
 from .config import get_config
@@ -71,6 +76,7 @@ VENDOR_LIST = [
     "yfinance",
     "alpha_vantage",
     "coingecko",
+    "binance",
 ]
 
 # Mapping of methods to their vendor-specific implementations
@@ -79,11 +85,13 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "binance": get_binance_stock_data,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "binance": get_binance_indicators_window,
     },
     # fundamental_data
     "get_fundamentals": {
@@ -110,6 +118,7 @@ VENDOR_METHODS = {
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "coingecko": get_crypto_status_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,

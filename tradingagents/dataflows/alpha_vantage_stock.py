@@ -4,26 +4,31 @@ from .alpha_vantage_common import _make_api_request, _filter_csv_by_date_range
 def get_stock(
     symbol: str,
     start_date: str,
-    end_date: str
+    end_date: str,
+    interval: str = "1d",
 ) -> str:
     """
-    Returns raw daily OHLCV values, adjusted close values, and historical split/dividend events
-    filtered to the specified date range.
+    Returns raw OHLCV values filtered to the specified date range.
+
+    For daily interval: returns daily adjusted time series.
+    For intraday intervals: returns intraday time series.
 
     Args:
         symbol: The name of the equity. For example: symbol=IBM
         start_date: Start date in yyyy-mm-dd format
         end_date: End date in yyyy-mm-dd format
+        interval: Trading interval (1m, 5m, 15m, 30m, 1h, 1d)
 
     Returns:
-        CSV string containing the daily adjusted time series data filtered to the date range.
+        CSV string containing the time series data filtered to the date range.
     """
-    # Parse dates to determine the range
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    from tradingagents.interval_utils import is_intraday, get_av_function, get_av_interval
+
+    # Parse date portion to determine the range
+    start_dt = datetime.strptime(start_date[:10], "%Y-%m-%d")
     today = datetime.now()
 
-    # Choose outputsize based on whether the requested range is within the latest 100 days
-    # Compact returns latest 100 data points, so check if start_date is recent enough
+    # Choose outputsize based on whether the requested range is within the latest 100 data points
     days_from_today_to_start = (today - start_dt).days
     outputsize = "compact" if days_from_today_to_start < 100 else "full"
 
@@ -33,6 +38,10 @@ def get_stock(
         "datatype": "csv",
     }
 
-    response = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", params)
+    if is_intraday(interval):
+        params["interval"] = get_av_interval(interval)
 
-    return _filter_csv_by_date_range(response, start_date, end_date)
+    function_name = get_av_function(interval)
+    response = _make_api_request(function_name, params)
+
+    return _filter_csv_by_date_range(response, start_date[:10], end_date[:10])

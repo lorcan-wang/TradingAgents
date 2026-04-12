@@ -502,36 +502,52 @@ def get_user_selections():
     console.print(
         create_question_box(
             "Step 1: Ticker Symbol",
-            "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK, BTC-USD, ETH-USD)",
+            "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK, BTC-USDT, ETH-USDT)",
             "SPY",
         )
     )
     selected_ticker = get_ticker()
 
-    # Step 2: Analysis date
-    default_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    # Step 2: Trading interval
     console.print(
         create_question_box(
-            "Step 2: Analysis Date",
-            "Enter the analysis date (YYYY-MM-DD)",
+            "Step 2: Trading Interval",
+            "Select the trading interval for analysis",
+            "Daily (1d)",
+        )
+    )
+    trading_interval = select_trading_interval()
+
+    # Step 3: Analysis date
+    is_intraday = trading_interval != "1d"
+    if is_intraday:
+        default_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        date_format_hint = "YYYY-MM-DD HH:MM"
+    else:
+        default_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        date_format_hint = "YYYY-MM-DD"
+    console.print(
+        create_question_box(
+            "Step 3: Analysis Date",
+            f"Enter the analysis date ({date_format_hint})",
             default_date,
         )
     )
-    analysis_date = get_analysis_date()
+    analysis_date = get_analysis_date(intraday=is_intraday)
 
-    # Step 3: Output language
+    # Step 4: Output language
     console.print(
         create_question_box(
-            "Step 3: Output Language",
+            "Step 4: Output Language",
             "Select the language for analyst reports and final decision"
         )
     )
     output_language = ask_output_language()
 
-    # Step 4: Select analysts
+    # Step 5: Select analysts
     console.print(
         create_question_box(
-            "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+            "Step 5: Analysts Team", "Select your LLM analyst agents for the analysis"
         )
     )
     selected_analysts = select_analysts()
@@ -539,32 +555,32 @@ def get_user_selections():
         f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
 
-    # Step 5: Research depth
+    # Step 6: Research depth
     console.print(
         create_question_box(
-            "Step 5: Research Depth", "Select your research depth level"
+            "Step 6: Research Depth", "Select your research depth level"
         )
     )
     selected_research_depth = select_research_depth()
 
-    # Step 6: LLM Provider
+    # Step 7: LLM Provider
     console.print(
         create_question_box(
-            "Step 6: LLM Provider", "Select your LLM provider"
+            "Step 7: LLM Provider", "Select your LLM provider"
         )
     )
     selected_llm_provider, backend_url = select_llm_provider()
 
-    # Step 7: Thinking agents
+    # Step 8: Thinking agents
     console.print(
         create_question_box(
-            "Step 7: Thinking Agents", "Select your thinking agents for analysis"
+            "Step 8: Thinking Agents", "Select your thinking agents for analysis"
         )
     )
     selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
     selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
 
-    # Step 8: Provider-specific thinking configuration
+    # Step 9: Provider-specific thinking configuration
     thinking_level = None
     reasoning_effort = None
     anthropic_effort = None
@@ -573,7 +589,7 @@ def get_user_selections():
     if provider_lower == "google":
         console.print(
             create_question_box(
-                "Step 8: Thinking Mode",
+                "Step 9: Thinking Mode",
                 "Configure Gemini thinking mode"
             )
         )
@@ -581,7 +597,7 @@ def get_user_selections():
     elif provider_lower == "openai":
         console.print(
             create_question_box(
-                "Step 8: Reasoning Effort",
+                "Step 9: Reasoning Effort",
                 "Configure OpenAI reasoning effort level"
             )
         )
@@ -589,7 +605,7 @@ def get_user_selections():
     elif provider_lower == "anthropic":
         console.print(
             create_question_box(
-                "Step 8: Effort Level",
+                "Step 9: Effort Level",
                 "Configure Claude effort level"
             )
         )
@@ -598,6 +614,7 @@ def get_user_selections():
     return {
         "ticker": selected_ticker,
         "analysis_date": analysis_date,
+        "trading_interval": trading_interval,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
         "llm_provider": selected_llm_provider.lower(),
@@ -616,22 +633,60 @@ def get_ticker():
     return typer.prompt("", default="SPY")
 
 
-def get_analysis_date():
+def select_trading_interval():
+    """Get the trading interval from user input."""
+    import questionary
+
+    choices = [
+        questionary.Choice("Daily (1d)", value="1d"),
+        questionary.Choice("1 Hour (1h)", value="1h"),
+        questionary.Choice("30 Minutes (30m)", value="30m"),
+        questionary.Choice("15 Minutes (15m)", value="15m"),
+        questionary.Choice("5 Minutes (5m)", value="5m"),
+        questionary.Choice("1 Minute (1m)", value="1m"),
+    ]
+    result = questionary.select(
+        "Select Your [Trading Interval]:",
+        choices=choices,
+        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        style=questionary.Style(
+            [
+                ("selected", "fg:yellow noinherit"),
+                ("highlighted", "fg:yellow noinherit"),
+                ("pointer", "fg:yellow noinherit"),
+            ]
+        ),
+    ).ask()
+
+    if result is None:
+        console.print("\n[red]No trading interval selected. Exiting...[/red]")
+        exit(1)
+
+    return result
+
+
+def get_analysis_date(intraday=False):
     """Get the analysis date from user input."""
+    if intraday:
+        default = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        fmt = "%Y-%m-%d %H:%M"
+        fmt_label = "YYYY-MM-DD HH:MM"
+    else:
+        default = datetime.datetime.now().strftime("%Y-%m-%d")
+        fmt = "%Y-%m-%d"
+        fmt_label = "YYYY-MM-DD"
+
     while True:
-        date_str = typer.prompt(
-            "", default=datetime.datetime.now().strftime("%Y-%m-%d")
-        )
+        date_str = typer.prompt("", default=default)
         try:
-            # Validate date format and ensure it's not in the future
-            analysis_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-            if analysis_date.date() > datetime.datetime.now().date():
+            analysis_date = datetime.datetime.strptime(date_str, fmt)
+            if analysis_date > datetime.datetime.now():
                 console.print("[red]Error: Analysis date cannot be in the future[/red]")
                 continue
             return date_str
         except ValueError:
             console.print(
-                "[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]"
+                f"[red]Error: Invalid date format. Please use {fmt_label}[/red]"
             )
 
 
@@ -942,6 +997,7 @@ def run_analysis():
     config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
     config["anthropic_effort"] = selections.get("anthropic_effort")
     config["output_language"] = selections.get("output_language", "English")
+    config["trading_interval"] = selections.get("trading_interval", "1d")
 
     # Create stats callback handler for tracking LLM/tool calls
     stats_handler = StatsCallbackHandler()
@@ -965,7 +1021,8 @@ def run_analysis():
     start_time = time.time()
 
     # Create result directory
-    results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
+    safe_date = selections["analysis_date"].replace(":", "-")
+    results_dir = Path(config["results_dir"]) / selections["ticker"] / safe_date
     results_dir.mkdir(parents=True, exist_ok=True)
     report_dir = results_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -1040,6 +1097,14 @@ def run_analysis():
             f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
         )
         update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
+
+        # Auto-switch data vendors when ticker is a cryptocurrency. This
+        # mirrors what TradingAgentsGraph.propagate() does, and must be
+        # called explicitly here because the CLI streams the graph
+        # directly via graph.graph.stream() instead of going through
+        # propagate(), so the switch would otherwise never fire.
+        graph.ticker = selections["ticker"]
+        vendor_snapshot = graph.apply_crypto_vendor_switch(selections["ticker"])
 
         # Initialize state and get graph args with callbacks
         init_agent_state = graph.propagator.create_initial_state(
