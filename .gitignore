@@ -221,3 +221,7 @@ __marimo__/
 # Runtime output
 results/
 reports/
+
+# Local debug / scratch scripts
+scratch_test_*.py
+scratch_test_output/
