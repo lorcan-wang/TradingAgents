@@ -106,6 +106,50 @@ def get_intraday_banner() -> str:
     )
 
 
+def get_intraday_decision_context() -> str:
+    """Return a short intraday-framing block for downstream non-analyst agents.
+
+    The analyst banner (``get_intraday_banner``) is large and tool-call
+    focused. Researchers, the trader, risk debators and the portfolio
+    manager don't make tool calls — they just need to know that the
+    decision they are debating is a session-level intraday trade, not a
+    multi-week investment thesis. Otherwise their default prompt language
+    ("growth potential", "long-term sustainability", "portfolio
+    allocation") drags the final BUY/HOLD/SELL toward a long-term frame
+    that is mismatched with the intraday data the analysts produced.
+
+    Returns empty string in daily mode so existing prompts stay
+    byte-identical.
+    """
+    from tradingagents.dataflows.config import get_config
+    from tradingagents.interval_utils import is_intraday
+    interval = get_config().get("trading_interval", "1d")
+    if not is_intraday(interval):
+        return ""
+
+    labels = {
+        "1m": ("1-minute", "the next few minutes"),
+        "5m": ("5-minute", "the next 30-60 minutes"),
+        "15m": ("15-minute", "the next 1-3 hours"),
+        "30m": ("30-minute", "the next 2-4 hours"),
+        "1h": ("1-hour", "the next few hours within today's session"),
+    }
+    bar_label, horizon = labels.get(interval, (interval, "the current session"))
+    return (
+        f"[INTRADAY DECISION — {bar_label} bars, horizon: {horizon}]\n"
+        "This is a SESSION-LEVEL intraday trade, not a multi-day or multi-week "
+        "investment thesis. Frame all reasoning around short-term momentum, "
+        "intraday volatility, session support/resistance, order-flow signals, "
+        "and news/events within the current session. The position will likely "
+        "be opened and closed within the same trading session.\n"
+        "DO NOT argue from quarterly fundamentals, multi-year growth potential, "
+        "long-term competitive moats, or strategic portfolio allocation — those "
+        "framings are mismatched with the actual decision horizon. 'Hold' here "
+        "means 'do not take a new intraday position right now', NOT 'keep "
+        "owning the stock long-term'.\n\n"
+    )
+
+
 def build_instrument_context(ticker: str) -> str:
     """Describe the exact instrument so agents preserve exchange-qualified tickers."""
     return (
